@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 import os
 from dotenv import load_dotenv
@@ -7,9 +9,8 @@ from app.telegram_handlers import start, help_command, handle_document, handle_t
 
 # Load environment variables from .env file
 load_dotenv()
-
-app = FastAPI()
 BOT_TOKEN = os.getenv("TELE_BOT_KEY")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not BOT_TOKEN:
     raise ValueError("TELE_BOT_KEY environment variable is not set. Please check your .env file.")
@@ -25,6 +26,28 @@ application.add_handler(CommandHandler("delete", delete_resume))
 application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 application.add_handler(CallbackQueryHandler(handle_tone_selection, pattern="^tone_"))
+
+
+# NEW: Lifespan event handler (replaces on_event)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage bot lifecycle: startup and shutdown"""
+    # Startup
+    await application.initialize()
+    await application.start()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+    print(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+
+    yield  # App runs here
+
+    # Shutdown
+    await application.stop()
+    await application.shutdown()
+    print("🛑 Bot stopped.")
+
+
+# Create FastAPI app WITH lifespan
+app = FastAPI(lifespan=lifespan)
 
 
 # FastAPI Health check endpoint
