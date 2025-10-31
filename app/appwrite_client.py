@@ -1,7 +1,7 @@
 from appwrite.client import Client
 from appwrite.query import Query
-from appwrite.services.databases import Databases
-from  appwrite.services.storage import Storage
+from appwrite.services.tables_db import TablesDB
+from appwrite.services.storage import Storage
 from appwrite.id import ID
 import os
 from dotenv import load_dotenv
@@ -16,7 +16,7 @@ client.set_project(os.getenv("APPWRITE_PROJECT_ID"))  # Your project ID
 client.set_key(os.getenv("APPWRITE_API_KEY"))  # Your secret API key
 
 # Initialize Appwrite services
-databases = Databases(client)
+tables_db = TablesDB(client)
 storage = Storage(client)
 
 # Constants for database and collection IDs
@@ -30,19 +30,19 @@ def save_resume(user_id:str, resume_text:str, file_name:str):
 
     # Check if user already has a resume
     try:
-        existing = databases.list_documents(
+        existing = tables_db.list_rows(
             database_id=Databases_ID,
-            collection_id=Resumes_Collection_ID,
+            table_id=Resumes_Collection_ID,
             queries=[Query.equal("user_id", user_id)]
         )
 
         if existing['total'] > 0:
             # Update existing resume
-            document_id = existing['documents'][0]['$id']
-            return databases.update_document(
+            row_id = existing['rows'][0]['$id']
+            return tables_db.update_row(
                 database_id=Databases_ID,
-                collection_id=Resumes_Collection_ID,
-                document_id=document_id,
+                table_id=Resumes_Collection_ID,
+                row_id=row_id,
                 data={
                     "resume_text": resume_text,
                     "file_name": file_name
@@ -52,10 +52,10 @@ def save_resume(user_id:str, resume_text:str, file_name:str):
         print(f"No existing resume found: {e}")
 
     # Create new resume
-    return databases.create_document(
+    return tables_db.create_row(
         database_id=Databases_ID,
-        collection_id=Resumes_Collection_ID,
-        document_id=ID.unique(),
+        table_id=Resumes_Collection_ID,
+        row_id=ID.unique(),
         data={
             "user_id": user_id,
             "resume_text": resume_text,
@@ -65,31 +65,31 @@ def save_resume(user_id:str, resume_text:str, file_name:str):
 
 def get_resume(user_id:str):
     """Fetch user's resume from the database"""
-    result = databases.list_documents(
+    result = tables_db.list_rows(
         database_id=Databases_ID,
-        collection_id=Resumes_Collection_ID,
+        table_id=Resumes_Collection_ID,
         queries=[Query.equal("user_id", user_id)]
     )
 
     if result['total'] > 0:
-        return result['documents'][0]
+        return result['rows'][0]
     return None
 
 def delete_resume(user_id:str):
-    """Delete user's resume from  the database"""
+    """Delete user's resume from the database"""
     try:
-        existing = databases.list_documents(
+        existing = tables_db.list_rows(
             database_id=Databases_ID,
-            collection_id=Resumes_Collection_ID,
+            table_id=Resumes_Collection_ID,
             queries=[Query.equal("user_id", user_id)]
         )
 
         if existing['total']>0:
-            doc_id = existing['documents'][0]['$id']
-            databases.delete_document(
+            row_id = existing['rows'][0]['$id']
+            tables_db.delete_row(
                 database_id=Databases_ID,
-                collection_id=Resumes_Collection_ID,
-                document_id=doc_id
+                table_id=Resumes_Collection_ID,
+                row_id=row_id
             )
             return True
     except Exception as e:
