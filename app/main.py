@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from app.telegram_handlers import start, help_command, handle_document, handle_text, delete_resume, handle_tone_selection, error_handler
 import logging
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -48,42 +49,62 @@ application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 application.add_handler(CallbackQueryHandler(handle_tone_selection, pattern="^tone_"))
 
+# Track initialization state
+_init_lock = asyncio.Lock()
+_is_initialized = False
+
+
+async def ensure_application_initialized():
+    """Ensure the application is initialized before processing updates"""
+    global _is_initialized
+
+    async with _init_lock:
+        if not _is_initialized:
+            logger.info("Initializing bot application (first request)...")
+            await application.initialize()
+            await application.start()
+
+            # Set webhook if not in local mode
+            if ENV != "local":
+                try:
+                    # Delete any existing webhook first
+                    await application.bot.delete_webhook(drop_pending_updates=True)
+                    logger.info("Deleted existing webhook")
+                    # Set new webhook
+                    webhook_info = await application.bot.set_webhook(
+                        url=WEBHOOK_URL,
+                        allowed_updates=["message", "callback_query"]
+                    )
+                    logger.info(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+                    logger.info(f"Webhook response: {webhook_info}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to set webhook: {e}")
+                    raise
+            else:
+                logger.info(f"✅ Bot started in LOCAL mode (no webhook set)")
+
+            _is_initialized = True
+            logger.info("✅ Application initialized successfully")
+
 
 # NEW: Lifespan event handler (replaces on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage bot lifecycle: startup and shutdown"""
-    # Startup
-    logger.info("Initializing bot application...")
-    await application.initialize()
-    await application.start()
-
-    # Only set webhook if not in local polling mode
-    if ENV != "local":
-        try:
-            # Delete any existing webhook first
-            await application.bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Deleted existing webhook")
-            # Set new webhook
-            webhook_info = await application.bot.set_webhook(
-                url=WEBHOOK_URL,
-                allowed_updates=["message", "callback_query"]
-            )
-            logger.info(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
-            logger.info(f"Webhook response: {webhook_info}")
-        except Exception as e:
-            logger.error(f"❌ Failed to set webhook: {e}")
-            raise
-    else:
-        logger.info(f"✅ Bot started in LOCAL mode (no webhook set)")
+    # Startup - Initialize on startup if not serverless
+    logger.info("Lifespan startup triggered...")
+    await ensure_application_initialized()
 
     yield  # App runs here
 
     # Shutdown
     logger.info("Shutting down bot...")
-    await application.stop()
-    await application.shutdown()
-    logger.info("🛑 Bot stopped.")
+    try:
+        await application.stop()
+        await application.shutdown()
+        logger.info("🛑 Bot stopped.")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 
 # Create FastAPI app WITH lifespan
@@ -95,10 +116,14 @@ app = FastAPI(lifespan=lifespan)
 async def telegram_webhook(request: Request):
     """Handle incoming webhook updates from Telegram"""
     try:
+        # Ensure application is initialized (important for serverless)
+        await ensure_application_initialized()
+
         data = await request.json()
         logger.info(f"📥 Received webhook update: {data.get('update_id', 'unknown')}")
         update = Update.de_json(data, application.bot)
-        # Don't reinitialize - already done in lifespan
+
+        # Process the update
         await application.process_update(update)
         logger.info(f"✅ Successfully processed update: {data.get('update_id', 'unknown')}")
         return {"ok": True}
@@ -111,6 +136,9 @@ async def telegram_webhook(request: Request):
 async def health_check():
     """Health check endpoint for deployment platforms"""
     try:
+        # Ensure application is initialized
+        await ensure_application_initialized()
+
         # Try to get bot info to verify connection
         bot_info = await application.bot.get_me()
         webhook_info = await application.bot.get_webhook_info()
@@ -122,7 +150,8 @@ async def health_check():
             "environment": ENV,
             "webhook_url": webhook_info.url,
             "pending_update_count": webhook_info.pending_update_count,
-            "has_custom_certificate": webhook_info.has_custom_certificate
+            "has_custom_certificate": webhook_info.has_custom_certificate,
+            "initialized": _is_initialized
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -130,7 +159,8 @@ async def health_check():
             "status": "error",
             "bot": "error",
             "environment": ENV,
-            "error": str(e)
+            "error": str(e),
+            "initialized": _is_initialized
         }
 
 
