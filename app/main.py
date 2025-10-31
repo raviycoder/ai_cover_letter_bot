@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 import os
 from dotenv import load_dotenv
 from telegram import Update
@@ -9,7 +9,7 @@ load_dotenv()
 
 app = FastAPI()
 BOT_TOKEN = os.getenv("TELE_BOT_KEY")
-
+application = Application.builder().token(BOT_TOKEN).build()
 
 def create_application():
     """Create and return a configured telegram Application (does not start it).
@@ -18,8 +18,6 @@ def create_application():
     """
     if not BOT_TOKEN:
         raise ValueError("TELE_BOT_KEY environment variable is not set. Please check your .env file.")
-
-    application = Application.builder().token(BOT_TOKEN).build()
 
 
     # Register handlers
@@ -34,9 +32,11 @@ def create_application():
 
 
 # FastAPI Health check endpoint
-@app.get("/")
-async def root():
-    return {"message": "Bot is running", "status": "healthy"}
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    await application.process_update(Update.de_json(data, application.bot))
+    return {"ok": True}
 
 
 # For local testing with polling
