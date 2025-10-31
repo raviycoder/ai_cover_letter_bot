@@ -6,6 +6,14 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from app.telegram_handlers import start, help_command, handle_document, handle_text, delete_resume, handle_tone_selection, error_handler
+import logging
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -16,11 +24,11 @@ ENV = os.getenv("ENV", "production").lower()  # default to production if not set
 if ENV == "development" or ENV == "dev":
     # For local development
     WEBHOOK_URL = os.getenv("LOCAL_WEBHOOK_URL", "http://localhost:8000/telegram-webhook")
-    print(f"🔧 Running in DEVELOPMENT mode")
+    logger.info(f"🔧 Running in DEVELOPMENT mode")
 else:
     # For production (Vercel, Railway, etc.)
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    print(f"🚀 Running in PRODUCTION mode")
+    logger.info(f"🚀 Running in PRODUCTION mode")
 
 if not BOT_TOKEN:
     raise ValueError("TELE_BOT_KEY environment variable is not set. Please check your .env file.")
@@ -46,22 +54,36 @@ application.add_handler(CallbackQueryHandler(handle_tone_selection, pattern="^to
 async def lifespan(app: FastAPI):
     """Manage bot lifecycle: startup and shutdown"""
     # Startup
+    logger.info("Initializing bot application...")
     await application.initialize()
     await application.start()
 
     # Only set webhook if not in local polling mode
     if ENV != "local":
-        await application.bot.set_webhook(url=WEBHOOK_URL)
-        print(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+        try:
+            # Delete any existing webhook first
+            await application.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Deleted existing webhook")
+            # Set new webhook
+            webhook_info = await application.bot.set_webhook(
+                url=WEBHOOK_URL,
+                allowed_updates=["message", "callback_query"]
+            )
+            logger.info(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+            logger.info(f"Webhook response: {webhook_info}")
+        except Exception as e:
+            logger.error(f"❌ Failed to set webhook: {e}")
+            raise
     else:
-        print(f"✅ Bot started in LOCAL mode (no webhook set)")
+        logger.info(f"✅ Bot started in LOCAL mode (no webhook set)")
 
     yield  # App runs here
 
     # Shutdown
+    logger.info("Shutting down bot...")
     await application.stop()
     await application.shutdown()
-    print("🛑 Bot stopped.")
+    logger.info("🛑 Bot stopped.")
 
 
 # Create FastAPI app WITH lifespan
@@ -72,20 +94,47 @@ app = FastAPI(lifespan=lifespan)
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):
     """Handle incoming webhook updates from Telegram"""
-    data = await request.json()
-    update = Update.de_json(data, application.bot)
-    await application.initialize()  # Initialize if not already done
-    await application.process_update(update)
-    return {"ok": True}
+    try:
+        data = await request.json()
+        logger.info(f"📥 Received webhook update: {data.get('update_id', 'unknown')}")
+        update = Update.de_json(data, application.bot)
+        # Don't reinitialize - already done in lifespan
+        await application.process_update(update)
+        logger.info(f"✅ Successfully processed update: {data.get('update_id', 'unknown')}")
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"❌ Webhook error: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/")
 async def health_check():
     """Health check endpoint for deployment platforms"""
-    return {"status": "ok", "bot": "running", "environment": ENV}
+    try:
+        # Try to get bot info to verify connection
+        bot_info = await application.bot.get_me()
+        webhook_info = await application.bot.get_webhook_info()
+
+        return {
+            "status": "ok",
+            "bot": "running",
+            "bot_username": bot_info.username,
+            "environment": ENV,
+            "webhook_url": webhook_info.url,
+            "pending_update_count": webhook_info.pending_update_count,
+            "has_custom_certificate": webhook_info.has_custom_certificate
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "error",
+            "bot": "error",
+            "environment": ENV,
+            "error": str(e)
+        }
 
 
 # For local testing with polling
 if __name__ == "__main__":
-    print("Starting bot in polling mode (local testing)...")
+    logger.info("Starting bot in polling mode (local testing)...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
