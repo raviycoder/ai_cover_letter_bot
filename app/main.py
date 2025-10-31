@@ -10,10 +10,23 @@ from app.telegram_handlers import start, help_command, handle_document, handle_t
 # Load environment variables from .env file
 load_dotenv()
 BOT_TOKEN = os.getenv("TELE_BOT_KEY")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+ENV = os.getenv("ENV", "production").lower()  # default to production if not set
+
+# Determine webhook URL based on environment
+if ENV == "development" or ENV == "dev":
+    # For local development
+    WEBHOOK_URL = os.getenv("LOCAL_WEBHOOK_URL", "http://localhost:8000/telegram-webhook")
+    print(f"🔧 Running in DEVELOPMENT mode")
+else:
+    # For production (Vercel, Railway, etc.)
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    print(f"🚀 Running in PRODUCTION mode")
 
 if not BOT_TOKEN:
     raise ValueError("TELE_BOT_KEY environment variable is not set. Please check your .env file.")
+
+if not WEBHOOK_URL:
+    raise ValueError(f"WEBHOOK_URL is not set for {ENV} environment. Please check your .env file.")
 
 # Create the application instance
 application = Application.builder().token(BOT_TOKEN).build()
@@ -35,8 +48,13 @@ async def lifespan(app: FastAPI):
     # Startup
     await application.initialize()
     await application.start()
-    await application.bot.set_webhook(url=WEBHOOK_URL)
-    print(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+
+    # Only set webhook if not in local polling mode
+    if ENV != "local":
+        await application.bot.set_webhook(url=WEBHOOK_URL)
+        print(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+    else:
+        print(f"✅ Bot started in LOCAL mode (no webhook set)")
 
     yield  # App runs here
 
@@ -64,10 +82,10 @@ async def telegram_webhook(request: Request):
 @app.get("/")
 async def health_check():
     """Health check endpoint for deployment platforms"""
-    return {"status": "ok", "bot": "running"}
+    return {"status": "ok", "bot": "running", "environment": ENV}
 
 
 # For local testing with polling
 if __name__ == "__main__":
-    print("Starting bot polling...")
+    print("Starting bot in polling mode (local testing)...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
