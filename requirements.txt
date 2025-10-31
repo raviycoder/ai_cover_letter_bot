@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-telegram-bot
+openai
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+appwrite
+PyMuPDF
+google-genai

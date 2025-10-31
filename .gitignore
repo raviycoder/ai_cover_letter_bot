@@ -1,0 +1,54 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Editor/project files
+.idea/
+.vscode/
+*.swp
+
+# Operating system junk
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+*.env
+.env.*
+secret_*.json
+
+# Logs
+*.log
+
+# Test output
+htmlcov/
+.coverage
+*.cover
+*.py,cover
+
+# Other
+*.db
+*.sqlite3
+*.postcode
+*.pid
+*.pyo
+*.bak
+
+# If using Jupyter
+.ipynb_checkpoints
+
+# Ignore deployment configs if using multiple platforms (optional)
+vercel.json
