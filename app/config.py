@@ -8,6 +8,7 @@ class AppSettings(BaseSettings):
     APPWRITE_API_KEY: str
     OPENROUTER_API_KEY: str | None = Field(default=None)
     GEMINI_API_KEY: str | None = Field(default=None)
+    ENV: str = Field(default="production")
 
     class Config:
         env_file = ".env"
