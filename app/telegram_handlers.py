@@ -5,7 +5,7 @@ import httpx
 import telegram
 from telegram import Update, InlineKeyboardButton
 from telegram.ext import ContextTypes
-
+import logging
 from app.appwrite_client import save_resume, get_resume
 from app.pdf_parser import extract_text_from_pdf, validate_pdf
 from app.ai_backend import ai_backend
@@ -20,6 +20,24 @@ BOT_TOKEN = os.getenv("TELE_BOT_KEY")
 #Conversation tones
 WAITING_FOR_JD = 1
 WAITING_FOR_TONE = 2
+
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    logger.error(f"Update {update} caused error {context.error}")
+
+    # Optionally send error message to user
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "⚠️ An error occurred. Please try again."
+        )
 
 async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     """Send a message when /start is issued."""
@@ -42,7 +60,6 @@ async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE):
         "/delete - Delete saved resume"
     )
 
-
 async def help_command(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     """Send help message"""
     await update.message.reply_text(
@@ -54,7 +71,6 @@ async def help_command(update: Update, _context: ContextTypes.DEFAULT_TYPE):
         "/start - Start the bot\n"
         "/help - Show this help message"
     )
-
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle PDF document uploads"""
@@ -153,6 +169,10 @@ async def show_tone_selection(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_text(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages"""
+    # Add null checks
+    if not update or not update.message or not update.message.text:
+        return
+
     user_id = str(update.effective_user.id)
     jd_text = update.message.text
 
@@ -228,7 +248,6 @@ async def handle_tone_selection(update: Update, context: ContextTypes.DEFAULT_TY
             text="❌ Error generating cover letters. Please try again."
         )
         print(f"Error: {e}")
-
 
 async def delete_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete user's saved resume"""

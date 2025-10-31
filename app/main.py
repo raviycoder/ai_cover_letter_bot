@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
-from app.telegram_handlers import start, help_command, handle_document, handle_text, delete_resume, handle_tone_selection
+from app.telegram_handlers import start, help_command, handle_document, handle_text, delete_resume, handle_tone_selection, error_handler
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +18,7 @@ if not BOT_TOKEN:
 application = Application.builder().token(BOT_TOKEN).build()
 
 # Register handlers immediately (for both webhook and polling)
+application.add_error_handler(error_handler)
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("delete", delete_resume))
