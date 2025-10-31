@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from app.telegram_handlers import start, help_command, handle_document, handle_text, delete_resume, handle_tone_selection, error_handler
 import logging
-import asyncio
+import threading
 
 # Configure logging
 logging.basicConfig(
@@ -49,8 +49,8 @@ application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 application.add_handler(CallbackQueryHandler(handle_tone_selection, pattern="^tone_"))
 
-# Track initialization state
-_init_lock = asyncio.Lock()
+# Track initialization state - use threading.Lock instead of asyncio.Lock for serverless
+_init_lock = threading.Lock()
 _is_initialized = False
 
 
@@ -58,33 +58,39 @@ async def ensure_application_initialized():
     """Ensure the application is initialized before processing updates"""
     global _is_initialized
 
-    async with _init_lock:
+    # Use threading lock (works across event loops)
+    with _init_lock:
         if not _is_initialized:
             logger.info("Initializing bot application (first request)...")
-            await application.initialize()
-            await application.start()
+            try:
+                await application.initialize()
+                await application.start()
 
-            # Set webhook if not in local mode
-            if ENV != "local":
-                try:
-                    # Delete any existing webhook first
-                    await application.bot.delete_webhook(drop_pending_updates=True)
-                    logger.info("Deleted existing webhook")
-                    # Set new webhook
-                    webhook_info = await application.bot.set_webhook(
-                        url=WEBHOOK_URL,
-                        allowed_updates=["message", "callback_query"]
-                    )
-                    logger.info(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
-                    logger.info(f"Webhook response: {webhook_info}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to set webhook: {e}")
-                    raise
-            else:
-                logger.info(f"✅ Bot started in LOCAL mode (no webhook set)")
+                # Set webhook if not in local mode
+                if ENV != "local":
+                    try:
+                        # Delete any existing webhook first
+                        await application.bot.delete_webhook(drop_pending_updates=True)
+                        logger.info("Deleted existing webhook")
+                        # Set new webhook
+                        webhook_info = await application.bot.set_webhook(
+                            url=WEBHOOK_URL,
+                            allowed_updates=["message", "callback_query"]
+                        )
+                        logger.info(f"✅ Bot started. Webhook set to: {WEBHOOK_URL}")
+                        logger.info(f"Webhook response: {webhook_info}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to set webhook: {e}")
+                        # Don't raise here, mark as initialized anyway
+                        logger.warning("Continuing despite webhook setup error...")
+                else:
+                    logger.info(f"✅ Bot started in LOCAL mode (no webhook set)")
 
-            _is_initialized = True
-            logger.info("✅ Application initialized successfully")
+                _is_initialized = True
+                logger.info("✅ Application initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize application: {e}", exc_info=True)
+                raise
 
 
 # NEW: Lifespan event handler (replaces on_event)
@@ -93,16 +99,21 @@ async def lifespan(app: FastAPI):
     """Manage bot lifecycle: startup and shutdown"""
     # Startup - Initialize on startup if not serverless
     logger.info("Lifespan startup triggered...")
-    await ensure_application_initialized()
+    try:
+        await ensure_application_initialized()
+    except Exception as e:
+        logger.error(f"Lifespan initialization failed: {e}")
+        # Continue anyway - will initialize on first request
 
     yield  # App runs here
 
     # Shutdown
     logger.info("Shutting down bot...")
     try:
-        await application.stop()
-        await application.shutdown()
-        logger.info("🛑 Bot stopped.")
+        if _is_initialized:
+            await application.stop()
+            await application.shutdown()
+            logger.info("🛑 Bot stopped.")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
@@ -154,7 +165,7 @@ async def health_check():
             "initialized": _is_initialized
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"Health check failed: {e}", exc_info=True)
         return {
             "status": "error",
             "bot": "error",
